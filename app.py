@@ -3,7 +3,8 @@ from PIL import Image
 import os, zipfile
 import numpy as np
 from collections import defaultdict
-from google.colab import files
+import streamlit as st
+import tempfile
 
 def get_q_starts(page):
     d = page.get_text("dict")
@@ -60,7 +61,6 @@ def crop_pdf_universal(pdf_path, out_dir):
         y0 = s['y']-4
         y1 = same_col[0]['y']-6 if same_col else page.rect.height-10
         
-        # PURANA ALIGNMENT - number ke saath full width
         if is_double:
             clip = fitz.Rect(5, y0, page.rect.width/2-5, y1) if col==0 else fitz.Rect(page.rect.width/2+5, y0, page.rect.width-10, y1)
         else:
@@ -71,7 +71,6 @@ def crop_pdf_universal(pdf_path, out_dir):
         pix = page.get_pixmap(dpi=350, clip=clip)
         img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
 
-        # SPLIT WALE KA GAP KAM - sirf yaha change
         if not has_complete and col==0 and not same_col and is_double:
             right_list = sorted([t for t in page_dict[pno] if t['x']>=150], key=lambda t: t['y'])
             if right_list:
@@ -82,7 +81,6 @@ def crop_pdf_universal(pdf_path, out_dir):
                     r_img = Image.frombytes("RGB", [r_pix.width, r_pix.height], r_pix.samples)
                     img1 = trim_y_only(img, 12)
                     img2 = trim_y_only(r_img, 12)
-                    # Yaha gap 30 ki jagah 8px kar diya
                     GAP = 8  
                     merged = Image.new("RGB", (max(img1.width, img2.width), img1.height+GAP+img2.height), "white")
                     merged.paste(img1, (0,0))
@@ -96,12 +94,32 @@ def crop_pdf_universal(pdf_path, out_dir):
             img = trim_y_only(img, 12)
         
         img.save(f"{out_dir}/Q_{s['q']}.jpg")
-    print(f"DONE {len(os.listdir(out_dir))} Qs")
 
-uploaded = files.upload()
-pdf_path = list(uploaded.keys())[0]
-crop_pdf_universal(pdf_path, "/content/FINAL")
-with zipfile.ZipFile("/content/FINAL.zip", 'w') as z:
-    for f in sorted(os.listdir("/content/FINAL"), key=lambda x: int(x.split('_')[1].split('.')[0])):
-        z.write(f"/content/FINAL/{f}", f)
-files.download("/content/FINAL.zip")
+st.title("PDF Question Cropper")
+
+uploaded_file = st.file_uploader("Upload your PDF file", type=["pdf"])
+
+if uploaded_file is not None:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+        tmp_file.write(uploaded_file.read())
+        pdf_path = tmp_file.name
+
+    out_dir = "FINAL"
+    if st.button("Crop Questions"):
+        with st.spinner("Cropping questions..."):
+            crop_pdf_universal(pdf_path, out_dir)
+            
+            zip_path = "FINAL.zip"
+            with zipfile.ZipFile(zip_path, 'w') as z:
+                for f in sorted(os.listdir(out_dir), key=lambda x: int(x.split('_')[1].split('.')[0])):
+                    z.write(os.path.join(out_dir, f), f)
+            
+            st.success(f"DONE {len(os.listdir(out_dir))} Qs")
+            
+            with open(zip_path, "rb") as fp:
+                st.download_button(
+                    label="Download ZIP",
+                    data=fp,
+                    file_name="FINAL.zip",
+                    mime="application/zip"
+                )
